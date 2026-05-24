@@ -9,3 +9,16 @@ langchain
 langchain-community
 langchain-huggingface
 gradio
+langchain
+langgraph
+langgraph-cli
+langgraph-api
+langchain-community
+langchain-core
+langchain-text-splitters
+langchain_groq
+langchain_openai
+langchain_google_genai
+qdrant_client
+pydantic
+python-dotenv
