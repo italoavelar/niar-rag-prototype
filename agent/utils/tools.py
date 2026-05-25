@@ -12,8 +12,8 @@ load_dotenv()
 
 # --- Configurações Globais ---
 GEMINI_EMBEDD = True
-COLLECTION_NAME = ""
-EMBED_DIM = 768
+COLLECTION_NAME = "niar_rag_documents"
+EMBED_DIM = 3072
 MODEL_NAME = "gemini-2.5-flash-lite"
 
 # --- SINGLETONS (Gerenciadores de Conexão) ---

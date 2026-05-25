@@ -13,7 +13,7 @@ OUTPUT_FILE = Path("data/processed/documents.jsonl")
 CHUNK_SIZE = 1200
 CHUNK_OVERLAP = 200
 
-
+# Carrega o manifesto CSV para obter metadados dos documentos
 def load_manifest():
     metadata_by_file = {}
 
@@ -25,14 +25,14 @@ def load_manifest():
 
     return metadata_by_file
 
-
+# Limpa o texto removendo quebras de linha, tabs e múltiplos espaços
 def clean_text(text):
     text = text.replace("\n", " ")
     text = text.replace("\t", " ")
     text = " ".join(text.split())
     return text
 
-
+# Divide o texto em chunks com sobreposição
 def chunk_text(text, chunk_size=CHUNK_SIZE, overlap=CHUNK_OVERLAP):
     chunks = []
     start = 0
@@ -44,7 +44,7 @@ def chunk_text(text, chunk_size=CHUNK_SIZE, overlap=CHUNK_OVERLAP):
 
     return chunks
 
-
+# Processa os PDFs, extrai o texto, limpa, chunkifica e salva em JSONL
 def process_pdfs():
     OUTPUT_FILE.parent.mkdir(parents=True, exist_ok=True)
 

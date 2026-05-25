@@ -4,3 +4,4 @@ vectorstore/
 outputs/
 *.faiss
 .env
+data/processed/embeddings_backup.jsonl
