@@ -24,13 +24,9 @@ Para cada fonte utilizada, exiba:
 
 1. Título: [título do documento]
    Tipo: [artigo, lei, jurisprudência, documento médico, relatório, etc.]
-   Origem: [arquivo, URL, base de dados ou referência]
-   Trecho relevante: "[trecho resumido ou fragmento utilizado]"
 
 2. Título: ...
    Tipo: ...
-   Origem: ...
-   Trecho relevante: ...
 
 Nunca omita a seção "Fontes utilizadas". Caso nenhuma fonte seja recuperada, retorne:
 

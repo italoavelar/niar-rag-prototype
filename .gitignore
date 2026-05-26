@@ -5,3 +5,11 @@ outputs/
 *.faiss
 .env
 data/processed/embeddings_backup.jsonl
+*.py[oc]
+build/
+dist/
+wheels/
+*.egg-info
+.venv
+.langgraph_api/*
+*.pkl
