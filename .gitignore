@@ -4,7 +4,6 @@ vectorstore/
 outputs/
 *.faiss
 .env
-data/processed/embeddings_backup.jsonl
 *.py[oc]
 build/
 dist/
@@ -15,7 +14,3 @@ wheels/
 *.pkl.venv_wsl/
 .venv/
 .venv_wsl/
-
-# Arquivos gerados pelo processamento do corpus
-data/processed/documents.jsonl
-data/processed/embeddings_backup.jsonl
