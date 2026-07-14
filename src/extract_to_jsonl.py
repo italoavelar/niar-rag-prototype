@@ -1,5 +1,7 @@
 import csv
 import json
+import re
+from collections import Counter
 from pathlib import Path
 
 import fitz
@@ -12,21 +14,16 @@ OUTPUT_FILE = Path("data/processed/documents.jsonl")
 
 CHUNK_SIZE = 1200
 CHUNK_OVERLAP = 200
+MIN_CHUNK_SIZE = 120
+
+HEADER_FOOTER_SCAN_LINES = 4
+REPEATED_LINE_MIN_PAGES = 3
+REPEATED_LINE_MIN_RATIO = 0.25
 
 
 def parse_ria_dimensions(value: str) -> list[str]:
     """
     Converte o campo ria_dimension do CSV em uma lista.
-
-    Exemplo:
-    "Privacidade e Segurança; Transparência; Governança"
-
-    Retorno:
-    [
-        "Privacidade e Segurança",
-        "Transparência",
-        "Governança"
-    ]
     """
     if not value:
         return []
@@ -55,7 +52,7 @@ def load_manifest() -> dict[str, dict]:
         MANIFEST_FILE,
         "r",
         encoding="utf-8-sig",
-        newline=""
+        newline="",
     ) as file:
         reader = csv.DictReader(file)
 
@@ -102,30 +99,434 @@ def load_manifest() -> dict[str, dict]:
     return metadata_by_file
 
 
-def clean_text(text: str) -> str:
+def is_legislation_document(doc_metadata: dict) -> bool:
     """
-    Realiza apenas a limpeza básica do texto.
+    Identifica documentos jurídicos/normativos.
 
-    A limpeza avançada de cabeçalhos, rodapés, sumários,
-    agradecimentos e referências será adicionada posteriormente.
+    Para esses documentos, a limpeza é mais conservadora,
+    porque referências normativas podem ser conteúdo importante.
     """
-    text = text.replace("\t", " ")
-    text = text.replace("\n", " ")
-    text = " ".join(text.split())
+    document_type = doc_metadata.get("document_type", "").lower()
+    title = doc_metadata.get("title", "").lower()
+
+    legal_terms = [
+        "legislação",
+        "lei",
+        "resolução",
+        "regulation",
+        "regulamento",
+        "rdc",
+        "projeto de lei",
+    ]
+
+    return any(term in document_type for term in legal_terms) or any(
+        term in title for term in legal_terms
+    )
+
+
+def normalize_line(line: str) -> str:
+    """
+    Normaliza uma linha mantendo seu conteúdo.
+    """
+    line = line.replace("\u00a0", " ")
+    line = line.replace("\t", " ")
+    line = re.sub(r"\s+", " ", line)
+    return line.strip()
+
+
+def normalize_line_for_matching(line: str) -> str:
+    """
+    Normaliza uma linha para comparação de repetição.
+    """
+    line = normalize_line(line).lower()
+    line = re.sub(r"\s+", " ", line)
+    return line.strip(" -–—•·.:;|")
+
+
+def is_page_number_line(line: str) -> bool:
+    """
+    Detecta linhas que são apenas número de página.
+    """
+    line = normalize_line(line)
+
+    patterns = [
+        r"^\d+$",
+        r"^[-–—]\s*\d+\s*[-–—]$",
+        r"^\d+\s*/\s*\d+$",
+        r"^(page|página|pagina)\s+\d+(\s+(of|de)\s+\d+)?$",
+        r"^\d+\s+(of|de)\s+\d+$",
+    ]
+
+    return any(re.match(pattern, line, flags=re.IGNORECASE) for pattern in patterns)
+
+
+def is_noise_line(line: str) -> bool:
+    """
+    Remove linhas sem conteúdo semântico.
+    """
+    line = normalize_line(line)
+
+    if not line:
+        return True
+
+    if is_page_number_line(line):
+        return True
+
+    if len(line) <= 2 and not line.isalpha():
+        return True
+
+    if re.fullmatch(r"[-–—_=*•·. ]+", line):
+        return True
+
+    return False
+
+
+def extract_page_lines(page) -> list[str]:
+    """
+    Extrai texto da página preservando linhas.
+    """
+    try:
+        raw_text = page.get_text("text", sort=True)
+    except TypeError:
+        raw_text = page.get_text("text")
+
+    lines = []
+
+    for raw_line in raw_text.splitlines():
+        line = normalize_line(raw_line)
+
+        if line:
+            lines.append(line)
+
+    return lines
+
+
+def detect_repeated_margin_lines(
+    pages_lines: list[list[str]],
+) -> set[str]:
+    """
+    Detecta cabeçalhos e rodapés repetidos.
+
+    A detecção considera apenas as primeiras e últimas linhas
+    de cada página para evitar remover conteúdo normal do corpo.
+    """
+    page_count = len(pages_lines)
+
+    if page_count < REPEATED_LINE_MIN_PAGES:
+        return set()
+
+    line_counter = Counter()
+
+    for lines in pages_lines:
+        margin_lines = (
+            lines[:HEADER_FOOTER_SCAN_LINES]
+            + lines[-HEADER_FOOTER_SCAN_LINES:]
+        )
+
+        normalized_lines_on_page = {
+            normalize_line_for_matching(line)
+            for line in margin_lines
+            if line and not is_page_number_line(line)
+        }
+
+        for normalized_line in normalized_lines_on_page:
+            if 4 <= len(normalized_line) <= 180:
+                line_counter[normalized_line] += 1
+
+    min_repetitions = max(
+        REPEATED_LINE_MIN_PAGES,
+        int(page_count * REPEATED_LINE_MIN_RATIO),
+    )
+
+    return {
+        line
+        for line, count in line_counter.items()
+        if count >= min_repetitions
+    }
+
+
+def remove_repeated_margin_lines(
+    lines: list[str],
+    repeated_margin_lines: set[str],
+    cleaning_stats: dict,
+) -> list[str]:
+    """
+    Remove cabeçalhos/rodapés repetidos apenas nas margens da página.
+    """
+    cleaned_lines = []
+
+    last_index = len(lines) - 1
+
+    for index, line in enumerate(lines):
+        normalized = normalize_line_for_matching(line)
+
+        is_margin_position = (
+            index < HEADER_FOOTER_SCAN_LINES
+            or index > last_index - HEADER_FOOTER_SCAN_LINES
+        )
+
+        if is_margin_position and normalized in repeated_margin_lines:
+            cleaning_stats["repeated_margin_lines_removed"] += 1
+            continue
+
+        cleaned_lines.append(line)
+
+    return cleaned_lines
+
+
+def clean_page_lines(
+    lines: list[str],
+    repeated_margin_lines: set[str],
+    cleaning_stats: dict,
+) -> list[str]:
+    """
+    Limpa linhas da página sem juntar tudo de imediato.
+    """
+    cleaned_lines = remove_repeated_margin_lines(
+        lines=lines,
+        repeated_margin_lines=repeated_margin_lines,
+        cleaning_stats=cleaning_stats,
+    )
+
+    final_lines = []
+
+    for line in cleaned_lines:
+        line = normalize_line(line)
+
+        if is_noise_line(line):
+            cleaning_stats["noise_lines_removed"] += 1
+            continue
+
+        final_lines.append(line)
+
+    return final_lines
+
+
+def is_toc_like_line(line: str) -> bool:
+    """
+    Detecta linhas típicas de sumário.
+    """
+    line = normalize_line(line)
+
+    return bool(
+        re.search(r"\.{3,}\s*\d+$", line)
+        or re.search(r"\s{2,}\d+$", line)
+    )
+
+
+def should_discard_noninformative_page(
+    lines: list[str],
+    doc_metadata: dict,
+) -> bool:
+    """
+    Remove páginas geralmente não informativas:
+    sumário, listas de figuras/tabelas e agradecimentos.
+
+    A regra é conservadora para documentos legislativos.
+    """
+    if not lines:
+        return True
+
+    is_legislation = is_legislation_document(doc_metadata)
+
+    first_lines_text = " ".join(lines[:8]).lower()
+    page_text = " ".join(lines).lower()
+
+    toc_headings = [
+        "sumário",
+        "índice",
+        "indice",
+        "table of contents",
+        "contents",
+    ]
+
+    list_headings = [
+        "lista de figuras",
+        "lista de tabelas",
+        "list of figures",
+        "list of tables",
+    ]
+
+    acknowledgement_headings = [
+        "agradecimentos",
+        "acknowledgements",
+        "acknowledgments",
+    ]
+
+    if any(heading in first_lines_text for heading in toc_headings):
+        toc_like_lines = sum(1 for line in lines if is_toc_like_line(line))
+
+        if toc_like_lines >= 2 or len(page_text) < 2500:
+            return True
+
+    if any(heading in first_lines_text for heading in list_headings):
+        return True
+
+    if (
+        not is_legislation
+        and any(heading in first_lines_text for heading in acknowledgement_headings)
+        and len(page_text) < 3500
+    ):
+        return True
+
+    return False
+
+
+def find_references_start(
+    pages_lines: list[list[str]],
+    doc_metadata: dict,
+) -> tuple[int, int] | None:
+    """
+    Localiza o início de uma seção bibliográfica final.
+
+    Não remove referências em documentos legislativos,
+    pois referências normativas podem ser conteúdo essencial.
+    """
+    if is_legislation_document(doc_metadata):
+        return None
+
+    if not pages_lines:
+        return None
+
+    reference_headings = {
+        "references",
+        "bibliography",
+        "referências",
+        "referencias",
+        "referências bibliográficas",
+        "referencias bibliograficas",
+        "bibliografia",
+        "works cited",
+    }
+
+    start_page = max(0, int(len(pages_lines) * 0.55))
+
+    for page_index in range(start_page, len(pages_lines)):
+        lines = pages_lines[page_index]
+
+        for line_index, line in enumerate(lines):
+            normalized = normalize_line_for_matching(line)
+
+            if normalized in reference_headings:
+                return page_index, line_index
+
+            if (
+                len(normalized) <= 35
+                and normalized.startswith("references")
+            ):
+                return page_index, line_index
+
+    return None
+
+
+def apply_references_cut(
+    page_index: int,
+    lines: list[str],
+    references_start: tuple[int, int] | None,
+    cleaning_stats: dict,
+) -> list[str]:
+    """
+    Remove a seção de referências bibliográficas finais.
+    """
+    if references_start is None:
+        return lines
+
+    reference_page_index, reference_line_index = references_start
+
+    if page_index < reference_page_index:
+        return lines
+
+    if page_index > reference_page_index:
+        cleaning_stats["reference_pages_removed"] += 1
+        return []
+
+    cleaning_stats["reference_section_starts_removed"] += 1
+    return lines[:reference_line_index]
+
+
+def lines_to_text(lines: list[str]) -> str:
+    """
+    Junta linhas corrigindo hifenização de fim de linha.
+    """
+    if not lines:
+        return ""
+
+    text_parts = []
+
+    for line in lines:
+        line = normalize_line(line)
+
+        if not line:
+            continue
+
+        if text_parts and text_parts[-1].endswith("-"):
+            previous = text_parts.pop()[:-1]
+            text_parts.append(previous + line)
+        else:
+            text_parts.append(line)
+
+    text = " ".join(text_parts)
+
+    text = re.sub(r"(\w)-\s+(\w)", r"\1\2", text)
+    text = re.sub(r"\s+", " ", text)
 
     return text.strip()
+
+
+def clean_text(text: str) -> str:
+    """
+    Limpeza final do texto já estruturado.
+    """
+    text = text.replace("\u00a0", " ")
+    text = text.replace("\t", " ")
+    text = re.sub(r"\s+", " ", text)
+    return text.strip()
+
+
+def choose_split_point(
+    text: str,
+    start: int,
+    raw_end: int,
+    min_size: int,
+) -> int:
+    """
+    Escolhe um ponto de quebra mais natural para o chunk.
+    """
+    if raw_end >= len(text):
+        return len(text)
+
+    min_end = start + min_size
+
+    punctuation_candidates = [
+        text.rfind(". ", start, raw_end),
+        text.rfind("; ", start, raw_end),
+        text.rfind(": ", start, raw_end),
+        text.rfind("? ", start, raw_end),
+        text.rfind("! ", start, raw_end),
+    ]
+
+    best_punctuation = max(punctuation_candidates)
+
+    if best_punctuation >= min_end:
+        return best_punctuation + 1
+
+    whitespace = text.rfind(" ", start, raw_end)
+
+    if whitespace >= min_end:
+        return whitespace
+
+    return raw_end
 
 
 def chunk_text(
     text: str,
     chunk_size: int = CHUNK_SIZE,
     overlap: int = CHUNK_OVERLAP,
+    min_chunk_size: int = MIN_CHUNK_SIZE,
 ) -> list[str]:
     """
-    Divide o texto em chunks com sobreposição.
-
-    Esta é a estratégia atual. O chunking por parágrafos
-    será implementado em uma próxima etapa.
+    Divide o texto em chunks com sobreposição, evitando cortar
+    palavras e reduzindo chunks finais muito pequenos.
     """
     if chunk_size <= 0:
         raise ValueError("chunk_size deve ser maior que zero.")
@@ -134,21 +535,47 @@ def chunk_text(
         raise ValueError("overlap não pode ser negativo.")
 
     if overlap >= chunk_size:
-        raise ValueError(
-            "overlap deve ser menor que chunk_size."
-        )
+        raise ValueError("overlap deve ser menor que chunk_size.")
+
+    text = clean_text(text)
+
+    if not text:
+        return []
+
+    if len(text) <= chunk_size:
+        return [text] if len(text) >= min_chunk_size else []
 
     chunks = []
     start = 0
 
     while start < len(text):
-        end = start + chunk_size
+        raw_end = min(start + chunk_size, len(text))
+
+        end = choose_split_point(
+            text=text,
+            start=start,
+            raw_end=raw_end,
+            min_size=min_chunk_size,
+        )
+
         chunk = text[start:end].strip()
 
         if chunk:
             chunks.append(chunk)
 
-        start += chunk_size - overlap
+        if end >= len(text):
+            break
+
+        new_start = max(end - overlap, start + 1)
+
+        if new_start <= start:
+            break
+
+        start = new_start
+
+    if len(chunks) >= 2 and len(chunks[-1]) < min_chunk_size:
+        chunks[-2] = f"{chunks[-2]} {chunks[-1]}".strip()
+        chunks.pop()
 
     return chunks
 
@@ -211,10 +638,100 @@ def build_chunk_record(
     }
 
 
+def process_document(
+    pdf_file: Path,
+    doc_metadata: dict,
+    output_file,
+    global_stats: dict,
+) -> bool:
+    """
+    Processa um PDF completo.
+
+    Primeiro extrai todas as páginas para conseguir detectar
+    cabeçalhos e rodapés repetidos. Depois limpa e chunkifica.
+    """
+    pages_lines = []
+
+    with fitz.open(pdf_file) as document:
+        for page in document:
+            page_lines = extract_page_lines(page)
+            pages_lines.append(page_lines)
+
+    global_stats["total_pages"] += len(pages_lines)
+
+    repeated_margin_lines = detect_repeated_margin_lines(pages_lines)
+    references_start = find_references_start(
+        pages_lines=pages_lines,
+        doc_metadata=doc_metadata,
+    )
+
+    document_text_found = False
+
+    for page_index, original_lines in enumerate(pages_lines, start=1):
+        if not original_lines:
+            global_stats["raw_empty_pages"] += 1
+            continue
+
+        page_lines = apply_references_cut(
+            page_index=page_index - 1,
+            lines=original_lines,
+            references_start=references_start,
+            cleaning_stats=global_stats,
+        )
+
+        page_lines = clean_page_lines(
+            lines=page_lines,
+            repeated_margin_lines=repeated_margin_lines,
+            cleaning_stats=global_stats,
+        )
+
+        if should_discard_noninformative_page(
+            lines=page_lines,
+            doc_metadata=doc_metadata,
+        ):
+            global_stats["noninformative_pages_removed"] += 1
+            continue
+
+        text = clean_text(lines_to_text(page_lines))
+
+        if not text:
+            global_stats["empty_pages_after_cleaning"] += 1
+            continue
+
+        chunks = chunk_text(text)
+
+        if not chunks:
+            global_stats["pages_without_chunks"] += 1
+            continue
+
+        document_text_found = True
+
+        for chunk_index, chunk in enumerate(chunks):
+            data = build_chunk_record(
+                pdf_file=pdf_file,
+                doc_metadata=doc_metadata,
+                page_index=page_index,
+                chunk_index=chunk_index,
+                chunk=chunk,
+            )
+
+            output_file.write(
+                json.dumps(
+                    data,
+                    ensure_ascii=False,
+                )
+                + "\n"
+            )
+
+            global_stats["total_chunks"] += 1
+
+    return document_text_found
+
+
 def process_pdfs() -> None:
     """
-    Processa os PDFs do corpus, extrai o texto página por página,
-    cria os chunks e salva o resultado em JSONL.
+    Processa os PDFs do corpus, aplica limpeza avançada,
+    cria chunks e salva o resultado em JSONL.
     """
     if not INPUT_DIR.exists():
         raise FileNotFoundError(
@@ -238,12 +755,21 @@ def process_pdfs() -> None:
             f"Nenhum PDF encontrado em: {INPUT_DIR}"
         )
 
-    total_documents = len(pdf_files)
-    processed_documents = 0
-    failed_documents = 0
-    total_pages = 0
-    empty_pages = 0
-    total_chunks = 0
+    stats = {
+        "total_documents": len(pdf_files),
+        "processed_documents": 0,
+        "failed_documents": 0,
+        "total_pages": 0,
+        "raw_empty_pages": 0,
+        "empty_pages_after_cleaning": 0,
+        "noninformative_pages_removed": 0,
+        "repeated_margin_lines_removed": 0,
+        "noise_lines_removed": 0,
+        "reference_section_starts_removed": 0,
+        "reference_pages_removed": 0,
+        "pages_without_chunks": 0,
+        "total_chunks": 0,
+    }
 
     documents_without_metadata = []
     documents_without_text = []
@@ -270,61 +796,27 @@ def process_pdfs() -> None:
                     f"{pdf_file.name}"
                 )
 
-                failed_documents += 1
+                stats["failed_documents"] += 1
                 continue
 
-            document_text_found = False
-
             try:
-                with fitz.open(pdf_file) as document:
-                    for page_index, page in enumerate(
-                        document,
-                        start=1,
-                    ):
-                        total_pages += 1
-
-                        raw_text = page.get_text("text")
-                        text = clean_text(raw_text)
-
-                        if not text:
-                            empty_pages += 1
-                            continue
-
-                        document_text_found = True
-
-                        chunks = chunk_text(text)
-
-                        for chunk_index, chunk in enumerate(
-                            chunks
-                        ):
-                            data = build_chunk_record(
-                                pdf_file=pdf_file,
-                                doc_metadata=doc_metadata,
-                                page_index=page_index,
-                                chunk_index=chunk_index,
-                                chunk=chunk,
-                            )
-
-                            output_file.write(
-                                json.dumps(
-                                    data,
-                                    ensure_ascii=False,
-                                )
-                                + "\n"
-                            )
-
-                            total_chunks += 1
+                document_text_found = process_document(
+                    pdf_file=pdf_file,
+                    doc_metadata=doc_metadata,
+                    output_file=output_file,
+                    global_stats=stats,
+                )
 
                 if document_text_found:
-                    processed_documents += 1
+                    stats["processed_documents"] += 1
                 else:
                     documents_without_text.append(
                         pdf_file.name
                     )
-                    failed_documents += 1
+                    stats["failed_documents"] += 1
 
             except Exception as error:
-                failed_documents += 1
+                stats["failed_documents"] += 1
 
                 processing_errors.append(
                     {
@@ -341,12 +833,40 @@ def process_pdfs() -> None:
     print("\n" + "=" * 72)
     print("PROCESSAMENTO FINALIZADO")
     print("=" * 72)
-    print(f"PDFs encontrados: {total_documents}")
-    print(f"PDFs processados: {processed_documents}")
-    print(f"PDFs com falha: {failed_documents}")
-    print(f"Páginas analisadas: {total_pages}")
-    print(f"Páginas sem texto: {empty_pages}")
-    print(f"Chunks gerados: {total_chunks}")
+    print(f"PDFs encontrados: {stats['total_documents']}")
+    print(f"PDFs processados: {stats['processed_documents']}")
+    print(f"PDFs com falha: {stats['failed_documents']}")
+    print(f"Páginas analisadas: {stats['total_pages']}")
+    print(f"Páginas originalmente sem texto: {stats['raw_empty_pages']}")
+    print(
+        "Páginas vazias após limpeza: "
+        f"{stats['empty_pages_after_cleaning']}"
+    )
+    print(
+        "Páginas não informativas removidas: "
+        f"{stats['noninformative_pages_removed']}"
+    )
+    print(
+        "Linhas repetidas de cabeçalho/rodapé removidas: "
+        f"{stats['repeated_margin_lines_removed']}"
+    )
+    print(
+        "Linhas ruidosas removidas: "
+        f"{stats['noise_lines_removed']}"
+    )
+    print(
+        "Inícios de seção de referências removidos: "
+        f"{stats['reference_section_starts_removed']}"
+    )
+    print(
+        "Páginas de referências removidas: "
+        f"{stats['reference_pages_removed']}"
+    )
+    print(
+        "Páginas sem chunks após limpeza: "
+        f"{stats['pages_without_chunks']}"
+    )
+    print(f"Chunks gerados: {stats['total_chunks']}")
     print(f"Arquivo salvo em: {OUTPUT_FILE}")
 
     if documents_without_metadata:
