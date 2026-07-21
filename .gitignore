@@ -4,7 +4,6 @@ vectorstore/
 outputs/
 *.faiss
 .env
-data/processed/embeddings_backup.jsonl
 *.py[oc]
 build/
 dist/
@@ -14,3 +13,4 @@ wheels/
 .langgraph_api/*
 *.pkl.venv_wsl/
 .venv/
+.venv_wsl/
