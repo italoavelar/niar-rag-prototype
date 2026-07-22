@@ -10,7 +10,7 @@ from tqdm import tqdm
 
 INPUT_DIR = Path("docs/raw")
 MANIFEST_FILE = Path("corpus_manifest.csv")
-OUTPUT_FILE = Path("data/processed/documents.jsonl")
+OUTPUT_FILE = Path("data/processed/pdf_chunks.jsonl")
 
 CHUNK_SIZE = 1200
 CHUNK_OVERLAP = 200
@@ -37,9 +37,10 @@ def parse_ria_dimensions(value: str) -> list[str]:
 
 def load_manifest() -> dict[str, dict]:
     """
-    Carrega os metadados do corpus_manifest.csv.
+    Carrega os metadados dos documentos PDF presentes no corpus_manifest.csv.
 
     O dicionário retornado utiliza o nome do arquivo PDF como chave.
+    Registros HTML são ignorados por este extrator.
     """
     if not MANIFEST_FILE.exists():
         raise FileNotFoundError(
@@ -63,6 +64,7 @@ def load_manifest() -> dict[str, dict]:
             "year",
             "theme",
             "source_url",
+            "source_type",
         }
 
         available_columns = set(reader.fieldnames or [])
@@ -75,7 +77,16 @@ def load_manifest() -> dict[str, dict]:
             )
 
         for row_number, row in enumerate(reader, start=2):
-            filename = row.get("filename", "").strip()
+            source_type = (
+                row.get("source_type") or ""
+            ).strip().upper()
+
+            if source_type != "PDF":
+                continue
+
+            filename = (
+                row.get("filename") or ""
+            ).strip()
 
             if not filename:
                 print(
@@ -90,6 +101,7 @@ def load_manifest() -> dict[str, dict]:
                 )
 
             row["filename"] = filename
+            row["source_type"] = source_type
             row["ria_dimensions"] = parse_ria_dimensions(
                 row.get("ria_dimension", "")
             )
@@ -97,7 +109,6 @@ def load_manifest() -> dict[str, dict]:
             metadata_by_file[filename] = row
 
     return metadata_by_file
-
 
 def is_legislation_document(doc_metadata: dict) -> bool:
     """

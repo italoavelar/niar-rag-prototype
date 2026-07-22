@@ -1,31 +1,64 @@
 import os
+
 import numpy as np
 from dotenv import load_dotenv
 from google import genai
 from google.genai import types
 from qdrant_client import QdrantClient
 
-load_dotenv()
-# Configurações e constantes
+
 COLLECTION_NAME = "niar_rag_documents"
+DEFAULT_LIMIT = 4
+
+load_dotenv(dotenv_path=".env")
 
 QDRANT_URL = os.getenv("QDRANT_URL")
 QDRANT_API_KEY = os.getenv("QDRANT_API_KEY")
 GOOGLE_GENAI_API_KEY = os.getenv("GOOGLE_GENAI_API_KEY")
 
-# Normaliza um vetor para ter norma 1 (unitário)
-def normalize(vec):
-    v = np.array(vec)
-    norm = np.linalg.norm(v)
+
+def validate_environment() -> None:
+    """
+    Confirma se as variáveis necessárias estão disponíveis.
+    """
+    missing_variables = [
+        name
+        for name, value in {
+            "QDRANT_URL": QDRANT_URL,
+            "QDRANT_API_KEY": QDRANT_API_KEY,
+            "GOOGLE_GENAI_API_KEY": GOOGLE_GENAI_API_KEY,
+        }.items()
+        if not value
+    ]
+
+    if missing_variables:
+        raise EnvironmentError(
+            "Variáveis de ambiente ausentes: "
+            + ", ".join(missing_variables)
+        )
+
+
+def normalize(vector: list[float]) -> list[float]:
+    """
+    Normaliza um vetor para norma 1.
+    """
+    values = np.array(vector, dtype=float)
+    norm = np.linalg.norm(values)
 
     if norm == 0:
-        return v.tolist()
+        return values.tolist()
 
-    return (v / norm).tolist()
+    return (values / norm).tolist()
 
-# Gera o embedding para a query usando a API Gemini
-def embed_query(query):
-    client = genai.Client(api_key=GOOGLE_GENAI_API_KEY)
+
+def embed_query(query: str) -> list[float]:
+    """
+    Gera o embedding da consulta usando o mesmo modelo
+    utilizado na indexação dos documentos.
+    """
+    client = genai.Client(
+        api_key=GOOGLE_GENAI_API_KEY
+    )
 
     response = client.models.embed_content(
         model="gemini-embedding-001",
@@ -35,10 +68,60 @@ def embed_query(query):
         ),
     )
 
-    return normalize(response.embeddings[0].values)
+    return normalize(
+        response.embeddings[0].values
+    )
 
-# Testa a função de recuperação consultando o Qdrant com a query e exibindo os resultados
-def test_retrieval(query, limit=4):
+
+def format_source(payload: dict) -> tuple[str, str]:
+    """
+    Monta a referência da fonte conforme PDF ou HTML.
+    """
+    source_type = (
+        payload.get("source_type") or ""
+    ).strip().upper()
+
+    source_url = (
+        payload.get("source_url") or ""
+    ).strip()
+
+    source = (
+        payload.get("fonte") or ""
+    ).strip()
+
+    if source_type == "PDF":
+        page = payload.get("page")
+
+        location = (
+            f"Página {page}"
+            if page not in (None, "")
+            else "Página não informada"
+        )
+
+    elif source_type == "HTML":
+        location = "Página web"
+
+    else:
+        location = "Localização não informada"
+
+    reference = source_url or source or "[Fonte não disponível]"
+
+    return location, reference
+
+
+def test_retrieval(
+    query: str,
+    limit: int = DEFAULT_LIMIT,
+) -> None:
+    """
+    Consulta o Qdrant e exibe os resultados recuperados
+    com os metadados de PDF e HTML.
+    """
+    if not query.strip():
+        raise ValueError(
+            "A consulta não pode estar vazia."
+        )
+
     qdrant = QdrantClient(
         url=QDRANT_URL,
         api_key=QDRANT_API_KEY,
@@ -59,22 +142,79 @@ def test_retrieval(query, limit=4):
         print("Nenhum resultado encontrado.")
         return
 
-    for idx, point in enumerate(results.points, start=1):
-        payload = point.payload
+    for index, point in enumerate(
+        results.points,
+        start=1,
+    ):
+        payload = point.payload or {}
 
-        print(f"\nResultado {idx}")
+        source_type = (
+            payload.get("source_type") or ""
+        ).strip().upper()
+
+        location, source_reference = (
+            format_source(payload)
+        )
+
+        print(f"\nResultado {index}")
         print(f"Score: {point.score}")
-        print(f"Título: {payload.get('title')}")
-        print(f"Fonte: {payload.get('fonte')}")
-        print(f"Página: {payload.get('page')}")
-        print(f"Tipo: {payload.get('document_type')}")
-        print(f"Tema: {payload.get('theme')}")
+        print(
+            f"Título: "
+            f"{payload.get('title', '[Título não disponível]')}"
+        )
+        print(
+            f"Documento: "
+            f"{payload.get('document_id', '[ID não disponível]')}"
+        )
+        print(
+            f"Formato: "
+            f"{source_type or '[Formato não disponível]'}"
+        )
+        print(
+            f"Fonte original: "
+            f"{payload.get('fonte', '[Fonte não disponível]')}"
+        )
+        print(f"URL: {payload.get('source_url', '')}")
+        print(f"Localização: {location}")
+        print(
+            f"Tipo: "
+            f"{payload.get('document_type', '')}"
+        )
+        print(f"Autor: {payload.get('author', '')}")
+        print(f"Ano: {payload.get('year', '')}")
+        print(f"Tema: {payload.get('theme', '')}")
+        print(
+            "Dimensões de IA responsável: "
+            f"{payload.get('ria_dimensions', [])}"
+        )
+        print(f"Referência final: {source_reference}")
+
         print("\nTrecho:")
-        print(payload.get("texto", "")[:1000])
+        print(
+            str(payload.get("texto", ""))[:1200]
+        )
         print("-" * 80)
 
 
+def run_default_tests() -> None:
+    """
+    Executa perguntas para validar recuperação
+    de documentos PDF e HTML.
+    """
+    queries = [
+        "O que é telemedicina segundo a resolução do CFM?",
+        "Quais são os princípios de IA responsável?",
+        "O PL 2338 fala sobre sistemas de alto risco?",
+        "O que são dados pessoais sensíveis segundo a LGPD?",
+        "O que é a Rede Nacional de Dados em Saúde?",
+        "O que é uma avaliação de impacto à proteção de dados DPIA?",
+        "Quais são os princípios de inteligência artificial da OCDE?",
+    ]
+
+    for query in queries:
+        test_retrieval(query)
+
+
 if __name__ == "__main__":
-    test_retrieval("O que é telemedicina segundo a resolução do CFM?")
-    test_retrieval("Quais são os princípios de IA responsável?")
-    test_retrieval("O PL 2338 fala sobre sistemas de alto risco?")
+    validate_environment()
+    run_default_tests()
