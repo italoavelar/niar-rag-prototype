@@ -13,7 +13,7 @@ def create_agent_graph(checkpointer=None):
 
     llm = ChatGroq(
         temperature=0,
-        model_name="qwen/qwen3-32b",
+        model_name="openai/gpt-oss-120b",
         api_key=os.getenv("GROQ_API_KEY"),
         max_retries=3,
         timeout=None

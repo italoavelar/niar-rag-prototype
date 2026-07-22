@@ -114,22 +114,25 @@ def generate_embeddings(documents, processed_data):
     return processed_data
 
 # Constrói o payload para cada ponto a ser inserido no Qdrant com os metadados
-def build_payload(doc):
-    metadata = doc["metadata"]
+def build_payload(doc: dict) -> dict:
+    metadata = doc.get("metadata", {})
 
     return {
-        "id_original": doc["id"],
-        "texto": doc["text"],
+        "id_original": doc.get("id", ""),
+        "document_id": metadata.get("document_id", ""),
+        "texto": doc.get("text", ""),
         "fonte": metadata.get("source", ""),
+        "source_type": metadata.get("source_type", ""),
         "title": metadata.get("title", ""),
-        "page": metadata.get("page", ""),
+        "page": metadata.get("page"),
         "chunk": metadata.get("chunk", ""),
         "document_type": metadata.get("document_type", ""),
+        "author": metadata.get("author", ""),
         "year": metadata.get("year", ""),
         "theme": metadata.get("theme", ""),
+        "ria_dimensions": metadata.get("ria_dimensions", []),
         "source_url": metadata.get("source_url", ""),
     }
-
 
 def recreate_collection(qdrant):
     if not COLLECTION_NAME:
