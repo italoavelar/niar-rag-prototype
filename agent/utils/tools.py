@@ -1,9 +1,7 @@
 import os
-from langchain_google_genai import ChatGoogleGenerativeAI, GoogleGenerativeAIEmbeddings
-from langchain.tools import tool, ToolRuntime
+from langchain_core.tools import tool   # canônico: langchain.tools só reexporta
+                                        # daqui e custa ~25 s a mais no import
 from qdrant_client import QdrantClient
-from sentence_transformers import SentenceTransformer
-from google import genai
 import numpy as np
 from langchain_groq import ChatGroq
 from dotenv import load_dotenv
@@ -35,15 +33,30 @@ def get_qdrant_client():
     return _qdrant_instance
 
 def get_embedding_model():
-    """Retorna a instância única do modelo de Embedding (Gemini ou Local)."""
+    """Retorna a instância única do modelo de Embedding (Gemini ou Local).
+
+    Guarda o CLIENTE, que não depende da pergunta (modelo, chave, conexão). O
+    vetor continua sendo gerado a cada pergunta em get_embedding() — o que se
+    reaproveita é só a "linha telefônica", não a "ligação". Construir este
+    cliente custa ~1,1 s e não amortiza, então fazê-lo por pergunta era ~1 s de
+    latência em toda consulta.
+    """
     global _embedding_instance
     if _embedding_instance is None:
         print(f"[SISTEMA] Carregando modelo de embedding ({'Gemini' if GEMINI_EMBEDD else 'Local'})...")
         if GEMINI_EMBEDD:
-            # Cliente do Google GenAI
-            _embedding_instance = genai.Client(api_key=os.getenv("GOOGLE_GENAI_API_KEY"))
+            # Import tardio: 24 s de import, fora do caminho de subida do grafo.
+            from langchain_google_genai import GoogleGenerativeAIEmbeddings
+            _embedding_instance = GoogleGenerativeAIEmbeddings(
+                model="gemini-embedding-001",
+                task_type="retrieval_query",
+            )
         else:
-            # Modelo SentenceTransformer
+            # Modelo SentenceTransformer (import tardio: pesa muito e não é usado quando GEMINI_EMBEDD=True)
+            # ATENÇÃO: all-MiniLM-L6-v2 tem 384 dims e a coleção do Qdrant tem
+            # EMBED_DIM=3072 — este ramo falharia na busca. Trocar pelo BGE-m3
+            # (o embedding aberto que a avaliação usa) exigiria reindexar.
+            from sentence_transformers import SentenceTransformer
             EMBEDDING_MODEL_NAME = "all-MiniLM-L6-v2"
             _embedding_instance = SentenceTransformer(EMBEDDING_MODEL_NAME)
     return _embedding_instance
@@ -82,24 +95,17 @@ def normalize(vec):
     return (v / norm).tolist()
 
 def get_embedding(text: str):
-    """Gera o embedding usando a instância Singleton."""
+    """Gera o embedding DESTA pergunta, reusando o cliente do Singleton.
+
+    O vetor é novo a cada chamada (é ele que vai buscar no Qdrant); o que não se
+    refaz é o cliente.
+    """
     model = get_embedding_model()
-    
+
     if GEMINI_EMBEDD:
-        # 1. Inicializa o gerador de embeddings nativo
-        embeddings_model = GoogleGenerativeAIEmbeddings(
-            model="gemini-embedding-001",
-            task_type="retrieval_query"
-        )
-        
-        # 2. Gera o vetor da pergunta de forma segura
-        vetor = embeddings_model.embed_query(text)
-        
-        # 3. Retorna o vetor normalizado, conforme sua lógica original
-        return normalize(vetor)
-        
-    else:
-        return model.encode(text).tolist()
+        return normalize(model.embed_query(text))
+
+    return model.encode(text).tolist()
 # --- Ferramentas (Tools) ---
 
 @tool
@@ -135,7 +141,12 @@ def retrieve_information(query: str) -> str:
         formatted_docs = []
         for idx, point in enumerate(results.points, 1):
             texto = point.payload.get('texto', '[Texto não disponível]')
-            fonte = point.payload.get('fonte', '[Fonte não disponível]')
+            # 'fonte' no payload é só o nome do arquivo (metadata.source); o link
+            # real fica em source_url. Mesmo formato usado na avaliação
+            # (eval/lib/rag_runner.py:_format_context): "título — url".
+            titulo = point.payload.get('title') or point.payload.get('fonte') or '?'
+            url = point.payload.get('source_url', '')
+            fonte = f"{titulo} — {url}" if url else titulo
             
             doc_str = (
                 f"📄 DOCUMENTO {idx}:\n"

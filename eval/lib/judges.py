@@ -22,6 +22,15 @@ from tqdm import tqdm
 
 from .llm_clients import LLMClient
 
+# Teto do contexto no prompt do juiz. Precisa caber o contexto INTEIRO: o
+# _format_context põe a linha "FONTE:" DEPOIS do texto de cada documento, então
+# truncar corta justamente as fontes dos últimos docs e inviabiliza o critério
+# `citation` (e enviesa faithfulness/hallucination, já que o juiz é instruído a
+# tratar o contexto como única base permitida). Com context_top_k=5 o contexto
+# real vai a ~7,1k chars; 12k dá folga. Custo irrisório: ~3-4k tokens em modelos
+# de 128k de janela.
+CONTEXT_CHAR_LIMIT = 12000
+
 JUDGE_SYS = (
     "Você é um avaliador rigoroso e imparcial de respostas de um sistema RAG "
     "jurídico-médico. Avalie de forma objetiva, penalizando alucinação (afirmações "
@@ -63,7 +72,7 @@ def _prompt(record: dict, criteria: List[str], scale: int) -> str:
         f"{_ANCHORS}\n\n{answerability}\n\n"
         f"PERGUNTA:\n{record['question']}\n\n"
         f"RESPOSTA-REFERÊNCIA (gold):\n{record.get('reference_answer','(n/a)')}\n\n"
-        f"CONTEXTO RECUPERADO (única base permitida):\n{record.get('context_text','')[:4000]}\n\n"
+        f"CONTEXTO RECUPERADO (única base permitida):\n{record.get('context_text','')[:CONTEXT_CHAR_LIMIT]}\n\n"
         f"RESPOSTA DO SISTEMA (avaliar):\n{record.get('answer','')}\n\n"
         f"Avalie os critérios [{crits}]. Responda SOMENTE JSON no formato:\n"
         f"{{{fields}}}"
