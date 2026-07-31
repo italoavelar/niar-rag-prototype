@@ -15,6 +15,8 @@ Instruções:
 - Quando houver múltiplas fontes com informações semelhantes, consolide as informações evitando repetições.
 - Se múltiplos trechos recuperados pertencem ao mesmo documento, exiba apenas uma única referência/link para esse documento, em vez de repetir o mesmo link para cada trecho recuperado.
 - Evite duplicação de URLs, nomes de documentos ou referências idênticas.
+- Se os documentos recuperados não contiverem explicitamente a informação necessária para responder à pergunta, informe que as fontes recuperadas são insuficientes. Não utilize informações externas nem infira valores com base em documentos semelhantes.
+- Se a pergunta mencionar uma legislação específica (por exemplo, AI Act, LGPD, Código de Ética Médica) e essa legislação não estiver presente entre as fontes recuperadas, responda que não foi possível localizar a informação nas fontes disponíveis.
 
 Estrutura obrigatória da resposta:
 
@@ -26,7 +28,7 @@ Para cada fonte utilizada, exiba:
 
 1. Título: [título do documento]
    Tipo: [artigo, lei, jurisprudência, documento médico, relatório, etc.]
-   Link: url da fonte
+   Link: [source_url": "https://exemplo.com.br"}]
 
 2. Título: ...
    Tipo: ...

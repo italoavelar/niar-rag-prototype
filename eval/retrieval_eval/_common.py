@@ -56,7 +56,14 @@ def save_scenario(cfg, system, ranking, qrels, meta, corpus):
     o texto no próprio CSV, as etapas seguintes o consomem sem recuperar nem consultar
     o corpus de novo.
         qrel: 2 = chunk-fonte · 1 = vizinho (±1 pág.) · 0 = não relevante.
-    K = generation.context_top_k (o que vai para o gerador)."""
+    K = generation.context_top_k (o que vai para o gerador).
+
+    O CSV lista as 100 consultas, não só as 75 respondíveis: as fora-de-escopo
+    também são recuperadas, e é justamente o contexto delas que a Etapa 03 usa
+    para testar a RECUSA (o modelo precisa recusar TENDO material plausível em
+    mãos). A coluna `respondivel` separa as duas, e as colunas de métrica ficam
+    VAZIAS nas fora-de-escopo: nDCG/recall são indefinidos sem documento
+    relevante, não zero. A MÉDIA continua sendo só sobre as respondíveis."""
     ndcg_k, recall_k, precision_k, f1_k, mrr_k, _ = ks(cfg)
     res = M.evaluate_run(ranking, qrels, ndcg_k, recall_k, precision_k, f1_k, mrr_k)
     mcols = metric_cols(cfg)
@@ -69,10 +76,12 @@ def save_scenario(cfg, system, ranking, qrels, meta, corpus):
     csv_path = out_dir(cfg) / f"scenario_{system}.csv"
     with csv_path.open("w", newline="", encoding="utf-8") as f:
         w = csv.writer(f)
-        w.writerow(["qid", "question"] + doc_cols + mcols + ["tipo", "lingua"])
-        for qid in sorted(qrels):
+        w.writerow(["qid", "respondivel", "question"] + doc_cols + mcols
+                   + ["tipo", "lingua"])
+        for qid in sorted(meta):
             tipo, lang, question = meta.get(qid, ("", "", ""))
-            rel = qrels[qid]
+            answerable = qid in qrels
+            rel = qrels.get(qid, {})
             retrieved = ranking.get(qid, [])[:topk]
             docrow = []
             for i in range(topk):
@@ -81,9 +90,13 @@ def save_scenario(cfg, system, ranking, qrels, meta, corpus):
                     docrow += [cid, rel.get(cid, 0), (corpus.get(cid, {}).get("text", "") or "")]
                 else:
                     docrow += ["", "", ""]
-            metrics = [f"{res['per_query'][c].get(qid, 0.0):.4f}" for c in mcols]
-            w.writerow([qid, question] + docrow + metrics + [tipo, lang])
-        w.writerow(["MÉDIA", ""] + [""] * len(doc_cols)
+            # fora-de-escopo: métrica indefinida (não há relevante) → célula vazia
+            metrics = ([f"{res['per_query'][c].get(qid, 0.0):.4f}" for c in mcols]
+                       if answerable else [""] * len(mcols))
+            w.writerow([qid, "sim" if answerable else "não", question]
+                       + docrow + metrics + [tipo, lang])
+        # rótulo "MÉDIA" é lido por 05_report.py (_per_query_recall) — não renomear
+        w.writerow(["MÉDIA", f"{len(qrels)} respondíveis", ""] + [""] * len(doc_cols)
                    + [f"{res['mean'][c]:.4f}" for c in mcols] + ["", ""])
     primary = f"ndcg@{ndcg_k[0]}"
     print(f"  ✓ {system:<16} {primary}={res['mean'][primary]:.4f}  →  {csv_path.name}")
@@ -105,9 +118,13 @@ def dense_ranking(cfg, name, corpus, queries, rebuild=False):
     return dr.run_queries(queries, top_k)
 
 
-def finalize(cfg):
+def finalize(cfg, rewrite_csv=True):
     """Combina os rankings/<sys>.json em rankings.json + metrics.json +
-    per_query_ndcg.json + metrics.csv (com GeoRisk) — o que 03/05/exportadores usam."""
+    per_query_ndcg.json + metrics.csv (com GeoRisk) — o que 03/05/exportadores usam.
+
+    Com rewrite_csv, reescreve também os scenario_<sys>.csv a partir dos rankings
+    JÁ em disco — sem refazer busca nem gastar API. É o caminho para atualizar o
+    formato dos CSVs sem re-rodar a recuperação inteira."""
     od, rdir = out_dir(cfg), rankings_dir(cfg)
     ndcg_k, recall_k, precision_k, f1_k, mrr_k, _ = ks(cfg)
     primary = ndcg_k[0]
@@ -116,6 +133,10 @@ def finalize(cfg):
                for p in sorted(rdir.glob("*.json"))}
     if not systems:
         print("! nenhum ranking em", rdir, "— rode os cenários antes."); return
+    if rewrite_csv:
+        corpus = load_corpus(resolve(cfg["paths"]["corpus"]))
+        for s, rk in systems.items():
+            save_scenario(cfg, s, rk, qrels, meta, corpus)
     table, per_query_primary = {}, {}
     for s, rk in systems.items():
         res = M.evaluate_run(rk, qrels, ndcg_k, recall_k, precision_k, f1_k, mrr_k)

@@ -1,7 +1,6 @@
 """
 eval/lib/stats.py
 ═════════════════
-### NÃO ESTÁ SENDO USADO NO PIPELINE DE AVALIAÇÃO ATUAL
 Ferramentas estatísticas do protocolo de avaliação (Etapas 04 e 05):
 
   • paired_randomization   — teste de randomização (permutação) pareado, bicaudal

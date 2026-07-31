@@ -8,8 +8,9 @@ e grava (tag = <cenário>_icl{0,1}):
     results/generation/judged_<tag>.jsonl   bruto: resposta + notas + justificativas
     results/generation/scenario_<tag>.csv   organizado: resposta, contexto, médias
 
-Cenários:
-    A_bm25            geração a partir do contexto do BM25
+Cenários (a tag SEMPRE começa pelo nome do sistema de recuperação que a alimentou,
+o que mantém o mapeamento config→sistema do 05_report correto):
+    A_bm25[_mt]       geração a partir do BM25 (qual: retrieval.bm25.bm25_for_gen)
     B_dense_<emb>     geração a partir do denso (emb = retrieval.fusion.dense_for_fusion)
     C_fusion          geração a partir da fusão de deploy
     no_rag            SEM recuperação — Qwen sozinho (mede o valor da ferramenta)
@@ -53,6 +54,8 @@ class Setup:
         self.icl_variants = [bool(x) for x in self.cfg["generation"]["icl"]["variants"]]
         self.n_shots = self.cfg["generation"]["icl"]["n_shots"]
         self.dense_for_gen = self.cfg["retrieval"]["fusion"]["dense_for_fusion"]
+        self.bm25_for_gen = (self.cfg["retrieval"].get("bm25", {})
+                             .get("bm25_for_gen", "A_bm25"))
 
     def rankings(self, system):
         return self.rankings_all.get(system)
