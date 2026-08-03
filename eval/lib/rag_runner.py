@@ -86,7 +86,8 @@ class RagRunner:
         self.llm = LLMClient(
             provider=generator_spec["provider"], model=generator_spec["model"],
             temperature=generator_spec.get("temperature", 0),
-            max_tokens=generator_spec.get("max_tokens", 2048))
+            max_tokens=generator_spec.get("max_tokens", 2048),
+            reasoning_effort=generator_spec.get("reasoning_effort"))
         self.corpus = corpus
         self.context_top_k = context_top_k
 

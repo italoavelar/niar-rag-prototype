@@ -20,10 +20,12 @@ paths:
 # Geração do gold set (Etapa 01)
 # ----------------------------------------------------------------------------
 golden:
-  # Gerador das perguntas — precisa ser INDEPENDENTE dos modelos avaliados:
-  # ≠ Gemini (embedding, e pode virar gerador depois), ≠ Qwen (gerador do RAG),
-  # ≠ Llama / gpt-oss (juízes). Recomendado: gerar em sessão com o Claude.
-  # Alternativa via API: outra LLM independente (groq/cerebras).
+  # ATENÇÃO: o gold set EM USO (data/golden_qa.jsonl) foi gerado com o Claude em
+  # sessão e integrado por eval/tools/build_gold_manual.py — este bloco NÃO o
+  # produziu. Ele governa apenas o caminho automatizado (01_build_golden.py), que
+  # é o fallback caso se queira regerar via API.
+  # O gerador precisa ser INDEPENDENTE dos modelos avaliados: ≠ Gemini (embedding),
+  # ≠ Qwen (gerador do RAG), ≠ Llama / gpt-oss (juízes).
   generator:
     provider: "groq"
     model:    "moonshotai/kimi-k2-instruct"   # LLM independente (ajuste se indisponível)
@@ -143,9 +145,14 @@ embedders:
 generation:
   generator:
     provider: "groq"
-    model: "qwen/qwen3-32b"        # o "Qwen-32b" de produção
+    model: "qwen/qwen3.6-27b"        # o Qwen de produção
     temperature: 0
-    max_tokens: 2048
+    max_tokens: 4096                 # teto, não gasto: só se paga o que for gerado
+    # O Qwen é modelo de raciocínio: com o <think> ligado ele gastava os 2048
+    # tokens PENSANDO (em inglês) e devolvia a resposta truncada — 99 de 100
+    # respostas do 1º run saíram cortadas ou com a tag <think> aberta.
+    # No Groq os valores aceitos para a família qwen3 são "none" e "default".
+    reasoning_effort: "none"
   context_top_k: 5                 # nº de chunks no contexto (recomendado; use 4 p/ paridade c/ produção)
   icl:
     variants: [false, true]        # roda SEM e COM ICL (few-shot)
@@ -161,7 +168,7 @@ judges:
   models:
     - name: "llama"
       provider: "groq"
-      model: "llama-3.3-70b-versatile"
+      model: llama-3.1-8b-instant #"llama-3.3-70b-versatile"
     - name: "gptoss"
       provider: "groq"             # ou "cerebras"
       model: "openai/gpt-oss-120b"

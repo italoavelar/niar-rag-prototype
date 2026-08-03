@@ -61,7 +61,7 @@ def extract_json(text: str) -> dict | list:
 
 class LLMClient:
     def __init__(self, provider: str, model: str, temperature: float = 0.0,
-                 max_tokens: int = 2048):
+                 max_tokens: int = 2048, reasoning_effort: Optional[str] = None):
         from openai import OpenAI
         if provider not in PROVIDERS:
             raise ValueError(f"provedor desconhecido: {provider}")
@@ -70,6 +70,10 @@ class LLMClient:
         self.model = model
         self.temperature = temperature
         self.max_tokens = max_tokens
+        # Modelos de raciocínio (Qwen3, gpt-oss) gastam o orçamento de max_tokens
+        # pensando e devolvem a resposta truncada — ou nem a devolvem. No Groq,
+        # reasoning_effort="none" desliga o <think> no qwen/qwen3-32b.
+        self.reasoning_effort = reasoning_effort
         self._client = OpenAI(base_url=base_url,
                               api_key=get_env(key_name, required=True))
 
@@ -87,6 +91,8 @@ class LLMClient:
         )
         if json_mode:
             kwargs["response_format"] = {"type": "json_object"}
+        if self.reasoning_effort:
+            kwargs["reasoning_effort"] = self.reasoning_effort
 
         def _call():
             resp = self._client.chat.completions.create(**kwargs)
@@ -114,4 +120,5 @@ def build_client(spec: dict, default_temp: float = 0.0) -> LLMClient:
         model=spec["model"],
         temperature=spec.get("temperature", default_temp),
         max_tokens=spec.get("max_tokens", 2048),
+        reasoning_effort=spec.get("reasoning_effort"),
     )
