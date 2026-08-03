@@ -79,7 +79,7 @@ retrieval:
     translate_query: true
     translator:
       provider: "groq"
-      model: "llama-3.1-8b-instant"   # rápido/barato p/ traduzir; ajuste se indisponível
+      model: "llama-3.3-70b-versatile"
     # BM25 que alimenta a GERAÇÃO no Cenário A (etapa 03). Padrão: a versão
     # traduzida — é a mais forte e a MESMA que a fusão (C) usa, então o cenário A
     # representa o melhor BM25 possível, e não um espantalho. Use "A_bm25" para
@@ -168,7 +168,7 @@ judges:
   models:
     - name: "llama"
       provider: "groq"
-      model: llama-3.1-8b-instant #"llama-3.3-70b-versatile"
+      model: "llama-3.3-70b-versatile"
     - name: "gptoss"
       provider: "groq"             # ou "cerebras"
       model: "openai/gpt-oss-120b"
