@@ -173,6 +173,15 @@ def run_and_save(S, tag, rankings, icl, no_rag=False):
 
     save_jsonl(answers, od / f"judged_{tag}.jsonl")
     _scenario_csv(S, tag, answers, od)
-    part.unlink(missing_ok=True)
+    # Só descarta o checkpoint se TUDO deu certo. Sem isso, uma rodada que chega
+    # às 100 perguntas com juízes em erro apagava o .partial e "concluía" com os
+    # defeitos embutidos no arquivo final.
+    ruins = sum(1 for a in answers
+                if any("_error" in s for s in (a.get("scores") or {}).values()))
+    if ruins:
+        print(f"  ! {ruins} resposta(s) com juiz em erro — checkpoint preservado.")
+        print(f"    Conserte com: python tools/repair_generation.py --tag {tag}")
+    else:
+        part.unlink(missing_ok=True)
     print(f"  ✓ {len(answers)} respostas → judged_{tag}.jsonl + scenario_{tag}.csv")
     return answers
