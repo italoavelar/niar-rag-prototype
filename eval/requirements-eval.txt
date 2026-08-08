@@ -2,6 +2,7 @@
 numpy
 scipy
 scikit-learn
+openai
 pandas
 pyyaml
 tqdm
