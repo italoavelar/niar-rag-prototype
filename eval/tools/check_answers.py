@@ -24,13 +24,14 @@ EVAL = Path(__file__).resolve().parent.parent
 
 def completa(a: str) -> bool:
     t = a.rstrip()
-    if re.search(r"(#+|\*\*|\|)\s*$", t):      # construto markdown cortado no meio
-        return False
     if re.search(r"https?://\S+$", t):          # fecha no link da fonte: normal
         return True
     if re.search(r'https?://[^"]+"\}\s*$', t):  # link embrulhado em JSON
         return True
-    return t.endswith((".", "!", "?", ")"))
+    # remove fechamentos de markdown/citação do fim (aspas, *, `, #, |) antes de
+    # procurar a pontuação final: `...2009."` e `...distintos.*` são completas.
+    t = re.sub(r"[\s*`#|\"'”’]+$", "", t)
+    return t.endswith((".", "!", "?", ")", ":"))
 
 
 def verifica(path: Path) -> bool:
