@@ -1,0 +1,30 @@
+# Licença dos artefatos de avaliação
+
+Os artefatos de avaliação deste repositório — o *gold set* (`golden_qa.jsonl`),
+os julgamentos de relevância (`qrels.csv`), as consultas derivadas
+(`queries.csv`), os exemplos de ICL (`icl_examples.json`) e os resultados em
+`eval/results/` — são distribuídos sob a licença
+
+**Creative Commons Atribuição 4.0 Internacional (CC BY 4.0)**
+https://creativecommons.org/licenses/by/4.0/deed.pt-br
+
+Você pode copiar, redistribuir, adaptar e usar estes dados para qualquer
+finalidade, inclusive comercial, desde que atribua o crédito devido.
+
+## Como citar
+
+    [referência do artigo — LEME: assistente RAG em português para normas brasileiras e
+internacionais sobre saúde e IA Responsável]
+
+## Procedência do acervo
+
+O corpus (`data/processed/documents.jsonl`) é composto exclusivamente por
+documentos normativos de acesso público — legislação brasileira, atos
+infralegais, normas técnicas e diretrizes de organismos internacionais. Cada
+trecho armazena a URL de origem no campo `metadata.source_url`, permitindo
+verificar o documento original. Os direitos sobre os textos originais permanecem
+com seus respectivos emissores; esta licença cobre a curadoria, a segmentação e
+os metadados produzidos neste trabalho.
+
+O código-fonte é licenciado separadamente sob a licença MIT (ver `LICENSE` na
+raiz do repositório).
