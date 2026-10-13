@@ -14,3 +14,8 @@ wheels/
 *.pkl
 .venv/
 .venv_wsl/
+.langgraph_api
+
+# backups locais de correções (não versionar)
+*.bak-pre-correcao-qrels
+eval/results.bak-*/

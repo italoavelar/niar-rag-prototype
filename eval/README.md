@@ -1,9 +1,8 @@
 # Pipeline de avaliação do LEME
 
 Avalia o LEME de ponta a ponta. A **recuperação** é medida nos Cenários A/B/C; a
-**geração**, com e sem RAG e com e sem ICL, é pontuada por 2 juízes-LLM. O
-pipeline reporta métricas robustas e significância estatística. É o protocolo
-descrito na Seção 3 do artigo do WFA/WebMedia 2026.
+**geração**, com e sem RAG e com e sem ICL, é pontuada por 2 juízes-LLM. É o
+protocolo descrito na Seção 3 do artigo do WFA/WebMedia 2026.
 
 ## Visão geral
 
@@ -13,7 +12,6 @@ gold set ancorado  ──►  recuperação A/B/C (02)  ──►  geração × 
    │  + qrels + respostas   Recall, MRR                       │
    │    de referência                                         ▼
    └──────────────────────────────────────────►  concordância entre juízes (04)
-
 ```
 
 | Etapa | Script | O que faz | Métricas |
@@ -22,6 +20,7 @@ gold set ancorado  ──►  recuperação A/B/C (02)  ──►  geração × 
 | 02 | `02_retrieval_eval.py` | **A** BM25, sem e com tradução PT→EN · **B** denso (Gemini, BGE-m3 denso/multi-vetor/híbrido) · **C** fusão RRF | **nDCG@5** (principal), P@5, Recall@5/@100, MRR@10, GeoRisk, por idioma |
 | 03 | `generation_eval/run_all.py` | Gera as respostas nos cenários A/B/C × {sem, com ICL} e sem RAG; 2 juízes pontuam 7 critérios | fidelidade, alucinação, relevância, correção, completude, citação, recusa |
 | 04 | `04_agreement.py` | Concordância entre os juízes | κ ponderado, α de Krippendorff, Spearman, % exata e ±1 |
+| 05 | `05_significancia.py` | Comparações pareadas e não-inferioridade | randomização + Wilcoxon, correção de Holm, δ de Cliff, IC95% bootstrap |
 
 ## Decisões do protocolo
 
@@ -69,7 +68,9 @@ python eval/generation_eval/run_all.py --scenarios B no_rag   # só alguns cená
 # 4) concordância entre juízes
 python eval/04_agreement.py
 
-
+# 5) significância (randomização pareada + Wilcoxon, Holm, δ de Cliff)
+#    e não-inferioridade BGE-m3 vs. Gemini → results/significancia.csv
+python eval/05_significancia.py
 ```
 
 Análises complementares citadas no artigo:
@@ -92,9 +93,11 @@ só recalcula com `--rebuild`.
 
 | No artigo | Arquivo |
 |---|---|
-| Tabela 1 e diferença BGE-m3 − Gemini | `results/retrieval/metrics.csv`, `results/report.md` §1 |
-| Tabela 2 e contraste com vs. sem RAG | `results/generation/judged_*.jsonl`, `results/report.md` §2 e §4 |
-| Concordância entre juízes (κ) | `results/agreement/agreement.csv`, `results/report.md` §3 |
+| Tabela 1 (recuperação) | `results/retrieval/metrics.csv` |
+| Tabela 2 (geração) | `results/generation/judged_*.jsonl` |
+| Diferença BGE-m3 − Gemini, Holm e δ de Cliff | `results/significancia.csv` |
+| Concordância entre juízes (κ) | `results/agreement/agreement.csv` |
+| Contraste com vs. sem RAG por juiz | `tools/contraste_por_juiz.py` |
 | Ancoragem das URLs citadas | `results/generation/citation_grounding.csv` |
 
 ## Notas
@@ -102,10 +105,9 @@ só recalcula com `--rebuild`.
 1. **Corpus avaliado:** 63 fontes e 5.791 trechos (`data/processed/documents.jsonl`).
    Se o corpus mudar, reindexe o Qdrant (`src/build_vectorstore.py`) e **regenere os
    qrels**: os `chunk_id` mudam com o recorte.
-2. **Sem limiar de similaridade na avaliação:** A e B são buscas independentes no
-   corpus inteiro, cada uma com top-`retrieval.top_k` (100), para que Recall e nDCG
-   façam sentido. O `score_threshold` de `agent/utils/tools.py` não é aplicado aqui.
-
+2. **Sem limiar de similaridade:** A e B são buscas independentes no corpus inteiro,
+   cada uma com top-`retrieval.top_k` (100), para que Recall e nDCG façam sentido. A
+   geração recebe os 5 primeiros, como o agente em produção (`agent/utils/tools.py`).
 3. **Correção de q0015/q0016:** o gabarito dessas duas perguntas foi corrigido por
    `tools/corrige_qrels_q0015_q0016.py`. As duas tinham 91 e 100 trechos marcados
    como relevantes, efeito de fragmentos quase idênticos gerados pelo recorte. Os

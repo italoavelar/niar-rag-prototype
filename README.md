@@ -119,8 +119,8 @@ estão em `eval/`. Passo a passo em [`eval/README.md`](eval/README.md).
 | Artefato do artigo | Arquivo |
 |---|---|
 | Gold set e qrels | `eval/data/golden_qa.jsonl`, `eval/data/qrels.csv` |
-| Tabela 1 (recuperação) | `eval/results/retrieval/metrics.csv`, `eval/results/report.md` |
-| Tabela 2 (geração) e juízes | `eval/results/generation/judged_*.jsonl`, `eval/results/report.md` |
+| Tabela 1 (recuperação) | `eval/results/retrieval/metrics.csv` |
+| Tabela 2 (geração) e juízes | `eval/results/generation/judged_*.jsonl` |
 | Concordância entre juízes | `eval/results/agreement/agreement.csv` |
 | Contraste com vs. sem RAG por juiz | `eval/tools/contraste_por_juiz.py` |
 | Ancoragem das citações | `eval/results/generation/citation_grounding.csv` |
