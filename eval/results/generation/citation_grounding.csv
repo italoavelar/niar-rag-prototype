@@ -1,0 +1,8 @@
+config,respostas,com_secao_fontes,com_url,urls_citadas,ancoradas,ancoradas_exatas,nao_ancoradas,pct_ancoradas
+A_bm25_mt_icl0,100,100,99,161,161,161,0,100.0
+A_bm25_mt_icl1,100,100,98,155,155,155,0,100.0
+B_dense_gemini_icl0,100,100,99,160,160,160,0,100.0
+B_dense_gemini_icl1,100,100,100,158,158,158,0,100.0
+C_fusion_icl0,100,100,99,157,157,157,0,100.0
+C_fusion_icl1,100,100,99,150,150,150,0,100.0
+no_rag,100,86,45,149,16,8,133,10.7
